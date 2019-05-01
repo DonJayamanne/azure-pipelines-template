@@ -1,5 +1,6 @@
 parameters:
   jobs: []
+  tox_version: 'tox'
 
 jobs:
 - ${{ each job in parameters.jobs }}:
@@ -32,6 +33,10 @@ jobs:
               ${{ if or(eq(env, 'py38'), startsWith(env, 'py38-')) }}:
                 py: '3.7'
                 ispy38: true
+              ${{ if or(eq(env, 'jython'), startsWith(env, 'jython-')) }}:
+                py: '3.7'
+                is_jython: true
+
     pool:
       ${{ if job.value.image }}:
         vmImage: ${{ job.value.image }}
@@ -49,9 +54,14 @@ jobs:
       TMPDIR: $(Build.BinariesDirectory)
       PIP_NO_WARN_SCRIPT_LOCATION: '0'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      ${{ if job.value.env }}:
+        ${{ job.value.env }}
 
     steps:
+    - checkout: self
+      submodules: true
     - task: UsePythonVersion@0
+      displayName: provision python $(py)
       inputs:
         versionSpec: $(py)
         architecture: ${{ coalesce(job.value.architecture, 'x64') }}
@@ -61,13 +71,23 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends python3.8-dev python3.8-distutils
       condition: variables.ispy38
-      displayName: install python 3.8
+      displayName: 'provision python 3.8'
+
+    - script: |
+        wget http://search.maven.org/remotecontent?filepath=org/python/jython-installer/2.7.1/jython-installer-2.7.1.jar -O $(Agent.ToolsDirectory)/jython.jar
+        java -jar $(Agent.ToolsDirectory)/jython.jar -sd $(Agent.ToolsDirectory)/jython -e demo src doc
+        echo "##vso[task.setvariable variable=PATH]$(Agent.ToolsDirectory)/jython/bin:$(PATH)"
+      condition: variables.is_jython
+      displayName: 'provision jython'
 
     - script: 'python -c "import sys; print(sys.version); print(sys.executable);"'
       displayName: show python information
 
-    - script: "python -m pip install -U --user --force-reinstall tox"
+    - script: ${{ format('python -m pip install -U --user --force-reinstall {0}', parameters.tox_version) }}
       displayName: install tox
+
+    - ${{ if job.value.before }}:
+      - ${{ job.value.before }}
 
     - script: 'python -m tox --notest -vv --skip-missing-interpreters false'
       displayName: generate tox test environment
